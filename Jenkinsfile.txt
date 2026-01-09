@@ -1,0 +1,81 @@
+pipeline {
+    agent any
+
+    environment {
+        // Path to your local WebMethods Integration Server installation
+        WMSERVER_HOME = "C:/Users/vkraft_Auni/Documents/w/IntegrationServer"
+        // Name of your exported package
+        PACKAGE_NAME  = "employee.zip"
+        // Path to the package in Jenkins workspace
+        PACKAGE_PATH  = "${WORKSPACE}\\${PACKAGE_NAME}"
+        // API port of your local IS
+        API_PORT      = "5555"
+    }
+
+    stages {
+
+        stage('Clean Workspace') {
+            steps {
+                deleteDir()
+            }
+        }
+
+        stage('Checkout SCM') {
+            steps {
+                // Pull the latest exported package from Git
+                checkout scm
+            }
+        }
+
+        stage('Deploy WebMethods Package') {
+            steps {
+                echo "Deploying ${PACKAGE_NAME} to local WebMethods IS..."
+                script {
+                    // Deploy package using WebMethods deployer CLI (Windows)
+                    bat """
+                        "${WMSERVER_HOME}\\deployer\\bin\\deployer.bat" -silent -package "${PACKAGE_PATH}"
+                    """
+                }
+            }
+        }
+
+        stage('Verify API Health') {
+            steps {
+                script {
+                    // Only the insertEmployee endpoint for now
+                    def api = [method: 'POST', path: '/employee/insertEmployee']
+
+                    echo "Checking: ${api.method} ${api.path}"
+
+                    def ready = false
+                    for (int i = 1; i <= 10; i++) {
+                        sleep 10
+                        def status = bat(
+                            script: """powershell -Command "(Invoke-WebRequest -Method ${api.method} -Uri http://localhost:${API_PORT}${api.path} -UseBasicParsing).StatusCode" """,
+                            returnStdout: true
+                        ).trim()
+
+                        echo "Attempt ${i}: HTTP ${status}"
+
+                        if (status == "200" || status == "202") {
+                            ready = true
+                            echo "✔ API ready: ${api.method} ${api.path}"
+                            break
+                        }
+                    }
+
+                    if (!ready) {
+                        error "❌ API FAILED: ${api.method} ${api.path} not ready"
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            echo "Pipeline completed."
+            cleanWs()
+        }
+    }
+}
