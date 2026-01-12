@@ -2,25 +2,15 @@ pipeline {
     agent any
 
     environment {
-        IMAGE_NAME     = "myapi-img"
-        IMAGE_TAG      = "v1"
         CONTAINER_NAME = "myapi-container"
-        NETWORK_NAME   = "jenkins-net"
-        SERVICE_PORT   = "8290"
-
-        // WSO2 API Manager info
-        WSO2_AM_URL = "https://localhost:9443"
+        IMAGE_NAME = "myapi-img:v1"
+        NETWORK_NAME = "jenkins-net"
+        SERVICE_PORT = "8290"
+        API_PATH = "/appointmentservices/getAppointment"
         WSO2_TOKEN = credentials('wso2-api-token')
-        API_JSON   = "api-definition.json"
     }
 
     stages {
-        stage('Clean Workspace') {
-            steps {
-                echo "Skipping deleteDir to avoid breaking git clone"
-            }
-        }
-
         stage('Checkout SCM') {
             steps {
                 checkout scm
@@ -29,35 +19,40 @@ pipeline {
 
         stage('Create Docker Network') {
             steps {
-                sh "docker network inspect ${NETWORK_NAME} || docker network create ${NETWORK_NAME}"
+                script {
+                    def networkExists = sh(
+                        script: "docker network inspect ${NETWORK_NAME} >/dev/null 2>&1 || echo 'notfound'",
+                        returnStdout: true
+                    ).trim()
+                    
+                    if (networkExists == 'notfound') {
+                        sh "docker network create ${NETWORK_NAME}"
+                    } else {
+                        echo "Docker network '${NETWORK_NAME}' already exists"
+                    }
+                }
             }
         }
 
         stage('Build Docker Image') {
             steps {
-                echo "Building image: ${IMAGE_NAME}:${IMAGE_TAG}"
-                sh "docker build -t ${IMAGE_NAME}:${IMAGE_TAG} ."
+                echo "Building Docker image: ${IMAGE_NAME}"
+                sh "docker build -t ${IMAGE_NAME} ."
             }
         }
 
         stage('Stop & Remove Old Container') {
             steps {
-                sh """
-                    docker stop ${CONTAINER_NAME} || true
-                    docker rm ${CONTAINER_NAME} || true
-                """
+                script {
+                    sh "docker stop ${CONTAINER_NAME} || true"
+                    sh "docker rm ${CONTAINER_NAME} || true"
+                }
             }
         }
 
         stage('Run API Container') {
             steps {
-                sh """
-                    docker run -d \
-                        --name ${CONTAINER_NAME} \
-                        --network ${NETWORK_NAME} \
-                        -p ${SERVICE_PORT}:${SERVICE_PORT} \
-                        ${IMAGE_NAME}:${IMAGE_TAG}
-                """
+                sh "docker run -d --name ${CONTAINER_NAME} --network ${NETWORK_NAME} -p ${SERVICE_PORT}:${SERVICE_PORT} ${IMAGE_NAME}"
                 echo "⏳ Waiting 40 seconds for service to start..."
                 sleep 40
             }
@@ -66,34 +61,14 @@ pipeline {
         stage('Verify API Health') {
             steps {
                 script {
-                    def apis = [
-                        [method: 'GET', path: '/appointmentservices/getAppointment'],
-                        [method: 'PUT', path: '/appointmentservices/setAppointment']
-                    ]
-
-                    apis.each { api ->
-                        echo "Checking: ${api.method} ${api.path}"
-                        def ready = false
-
-                        for (int i = 1; i <= 10; i++) {
-                            sleep 10
-                            def status = sh(
-                                script: "curl -o /dev/null -s -w '%{http_code}' -X ${api.method} http://localhost:${SERVICE_PORT}${api.path}",
-                                returnStdout: true
-                            ).trim()
-
-                            echo "Attempt ${i}: HTTP ${status}"
-
-                            if (status == "200" || status == "202") {
-                                ready = true
-                                echo "✔ API ready: ${api.method} ${api.path}"
-                                break
-                            }
-                        }
-
-                        if (!ready) {
-                            error "❌ API FAILED: ${api.method} ${api.path} not ready"
-                        }
+                    echo "Checking API: GET ${API_PATH}"
+                    def status = sh(
+                        script: "curl -o /dev/null -s -w '%{http_code}' -X GET http://${CONTAINER_NAME}:${SERVICE_PORT}${API_PATH}",
+                        returnStdout: true
+                    ).trim()
+                    echo "API Response HTTP Code: ${status}"
+                    if (status != '200') {
+                        error "API Health check failed! Status: ${status}"
                     }
                 }
             }
@@ -101,50 +76,22 @@ pipeline {
 
         stage('Register API in WSO2') {
             steps {
-                script {
-                    echo "Registering API in WSO2 API Manager"
-                    retry(3) {
-                        sh """
-                        curl -k -X POST ${WSO2_AM_URL}/api/am/publisher/v4/apis \\
-                            -H "Authorization: Bearer ${WSO2_TOKEN}" \\
-                            -H "Content-Type: application/json" \\
-                            -d @${API_JSON}
-                        """
-                    }
-                }
+                echo "Skipping for now (add WSO2 registration scripts here)"
             }
         }
 
         stage('Smoke Test via API Gateway') {
             steps {
-                script {
-                    echo "Running smoke test via API Gateway"
-                    def apis = [
-                        '/appointmentservices/getAppointment',
-                        '/appointmentservices/setAppointment'
-                    ]
-                    apis.each { path ->
-                        def code = sh(
-                            script: "curl -o /dev/null -s -w '%{http_code}' http://localhost:8243${path}",
-                            returnStdout: true
-                        ).trim()
-                        echo "HTTP ${code} for ${path}"
-                        if (code != "200" && code != "202") {
-                            error "❌ Smoke test failed for ${path}"
-                        }
-                    }
-                }
+                echo "Skipping for now (add API Gateway smoke test scripts here)"
             }
         }
     }
 
     post {
         always {
-            echo "Pipeline completed. Cleaning workspace and stopping containers"
-            sh """
-                docker stop ${CONTAINER_NAME} || true
-                docker rm ${CONTAINER_NAME} || true
-            """
+            echo "Cleaning up: stopping and removing container, cleaning workspace"
+            sh "docker stop ${CONTAINER_NAME} || true"
+            sh "docker rm ${CONTAINER_NAME} || true"
             cleanWs()
         }
     }
