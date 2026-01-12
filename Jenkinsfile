@@ -16,14 +16,16 @@ pipeline {
 
     stages {
         stage('Clean Workspace') {
-            steps { deleteDir() }
+            steps {
+                // Optional: clean only after checkout
+                // deleteDir()
+                echo "Skipping deleteDir to avoid breaking git clone"
+            }
         }
 
         stage('Checkout SCM') {
             steps {
-                // Explicit Git checkout
-                git branch: 'main',
-                    url: 'https://github.com/aunihazimah/demo.git'
+                checkout scm
             }
         }
 
