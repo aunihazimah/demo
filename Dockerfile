@@ -1,17 +1,6 @@
 # Base image - official WSO2 Micro Integrator
 FROM wso2/wso2mi:4.4.0
 
-# Switch to root to install Docker CLI
-USER root
-
-# Install Docker CLI
-RUN apt-get update && \
-    apt-get install -y docker.io && \
-    rm -rf /var/lib/apt/lists/*
-
-# Optional: allow default user to run docker (if you run as non-root)
-RUN usermod -aG docker wso2carbon
-
 # Set working directory to where WSO2 deploys CAR files
 WORKDIR /home/wso2carbon/wso2mi-4.4.0/repository/deployment/server/carbonapps/
 
