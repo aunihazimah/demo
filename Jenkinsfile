@@ -26,6 +26,7 @@ pipeline {
                     ).trim()
                     
                     if (networkExists == 'notfound') {
+                        echo "Creating Docker network '${NETWORK_NAME}'..."
                         sh "docker network create ${NETWORK_NAME}"
                     } else {
                         echo "Docker network '${NETWORK_NAME}' already exists"
@@ -44,6 +45,7 @@ pipeline {
         stage('Stop & Remove Old Container') {
             steps {
                 script {
+                    echo "Stopping and removing old container if exists..."
                     sh "docker stop ${CONTAINER_NAME} || true"
                     sh "docker rm ${CONTAINER_NAME} || true"
                 }
@@ -62,8 +64,9 @@ pipeline {
             steps {
                 script {
                     echo "Checking API: GET ${API_PATH}"
+                    // Use localhost instead of container name
                     def status = sh(
-                        script: "curl -o /dev/null -s -w '%{http_code}' -X GET http://${CONTAINER_NAME}:${SERVICE_PORT}${API_PATH}",
+                        script: "curl -o /dev/null -s -w '%{http_code}' -X GET http://localhost:${SERVICE_PORT}${API_PATH}",
                         returnStdout: true
                     ).trim()
                     echo "API Response HTTP Code: ${status}"
