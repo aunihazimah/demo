@@ -15,29 +15,25 @@ pipeline {
     }
 
     stages {
-        stage('Clean Workspace') {
-            steps {
-                // Optional: clean only after checkout
-                // deleteDir()
-                echo "Skipping deleteDir to avoid breaking git clone"
-            }
-        }
-
         stage('Checkout SCM') {
             steps {
+                echo "Cloning repository"
                 checkout scm
             }
         }
 
         stage('Create Docker Network') {
             steps {
-                sh "docker network inspect ${NETWORK_NAME} || docker network create ${NETWORK_NAME}"
+                sh """
+                docker network inspect ${NETWORK_NAME} >/dev/null 2>&1 || \
+                docker network create ${NETWORK_NAME}
+                """
             }
         }
 
         stage('Build Docker Image') {
             steps {
-                echo "Building image: ${IMAGE_NAME}:${IMAGE_TAG}"
+                echo "Building Docker image: ${IMAGE_NAME}:${IMAGE_TAG}"
                 sh "docker build -t ${IMAGE_NAME}:${IMAGE_TAG} ."
             }
         }
@@ -45,8 +41,8 @@ pipeline {
         stage('Stop & Remove Old Container') {
             steps {
                 sh """
-                    docker stop ${CONTAINER_NAME} || true
-                    docker rm ${CONTAINER_NAME} || true
+                docker stop ${CONTAINER_NAME} >/dev/null 2>&1 || true
+                docker rm ${CONTAINER_NAME} >/dev/null 2>&1 || true
                 """
             }
         }
@@ -54,13 +50,13 @@ pipeline {
         stage('Run API Container') {
             steps {
                 sh """
-                    docker run -d \
-                        --name ${CONTAINER_NAME} \
-                        --network ${NETWORK_NAME} \
-                        -p ${SERVICE_PORT}:${SERVICE_PORT} \
-                        ${IMAGE_NAME}:${IMAGE_TAG}
+                docker run -d \
+                    --name ${CONTAINER_NAME} \
+                    --network ${NETWORK_NAME} \
+                    -p ${SERVICE_PORT}:${SERVICE_PORT} \
+                    ${IMAGE_NAME}:${IMAGE_TAG}
                 """
-                echo "⏳ Waiting 40 seconds for service to start..."
+                echo "Waiting 40 seconds for service to start"
                 sleep 40
             }
         }
@@ -74,7 +70,7 @@ pipeline {
                     ]
 
                     apis.each { api ->
-                        echo "Checking: ${api.method} ${api.path}"
+                        echo "Checking API: ${api.method} ${api.path}"
                         def ready = false
 
                         for (int i = 1; i <= 10; i++) {
@@ -94,7 +90,7 @@ pipeline {
                         }
 
                         if (!ready) {
-                            error "❌ API FAILED: ${api.method} ${api.path} not ready"
+                            error "API FAILED: ${api.method} ${api.path} not ready"
                         }
                     }
                 }
@@ -121,18 +117,18 @@ pipeline {
             steps {
                 script {
                     echo "Running smoke test via API Gateway"
-                    def apis = [
+                    def paths = [
                         '/appointmentservices/getAppointment',
                         '/appointmentservices/setAppointment'
                     ]
-                    apis.each { path ->
+                    paths.each { path ->
                         def code = sh(
                             script: "curl -o /dev/null -s -w '%{http_code}' http://localhost:8243${path}",
                             returnStdout: true
                         ).trim()
                         echo "HTTP ${code} for ${path}"
                         if (code != "200" && code != "202") {
-                            error "❌ Smoke test failed for ${path}"
+                            error "Smoke test failed for ${path}"
                         }
                     }
                 }
@@ -142,10 +138,10 @@ pipeline {
 
     post {
         always {
-            echo "Pipeline completed. Cleaning workspace and stopping containers"
+            echo "Pipeline completed. Stopping and removing container, cleaning workspace"
             sh """
-                docker stop ${CONTAINER_NAME} || true
-                docker rm ${CONTAINER_NAME} || true
+            docker stop ${CONTAINER_NAME} >/dev/null 2>&1 || true
+            docker rm ${CONTAINER_NAME} >/dev/null 2>&1 || true
             """
             cleanWs()
         }
