@@ -20,7 +20,11 @@ pipeline {
         }
 
         stage('Checkout SCM') {
-            steps { checkout scm }
+            steps {
+                // Explicit Git checkout
+                git branch: 'main',
+                    url: 'https://github.com/aunihazimah/demo.git'
+            }
         }
 
         stage('Create Docker Network') {
@@ -49,10 +53,10 @@ pipeline {
             steps {
                 sh """
                     docker run -d \
-                    --name ${CONTAINER_NAME} \
-                    --network ${NETWORK_NAME} \
-                    -p ${SERVICE_PORT}:${SERVICE_PORT} \
-                    ${IMAGE_NAME}:${IMAGE_TAG}
+                        --name ${CONTAINER_NAME} \
+                        --network ${NETWORK_NAME} \
+                        -p ${SERVICE_PORT}:${SERVICE_PORT} \
+                        ${IMAGE_NAME}:${IMAGE_TAG}
                 """
                 echo "⏳ Waiting 40 seconds for service to start..."
                 sleep 40
@@ -70,19 +74,23 @@ pipeline {
                     apis.each { api ->
                         echo "Checking: ${api.method} ${api.path}"
                         def ready = false
+
                         for (int i = 1; i <= 10; i++) {
                             sleep 10
                             def status = sh(
                                 script: "curl -o /dev/null -s -w '%{http_code}' -X ${api.method} http://${CONTAINER_NAME}:${SERVICE_PORT}${api.path}",
                                 returnStdout: true
                             ).trim()
+
                             echo "Attempt ${i}: HTTP ${status}"
+
                             if (status == "200" || status == "202") {
                                 ready = true
                                 echo "✔ API ready: ${api.method} ${api.path}"
                                 break
                             }
                         }
+
                         if (!ready) {
                             error "❌ API FAILED: ${api.method} ${api.path} not ready"
                         }
@@ -116,7 +124,14 @@ pipeline {
                         '/appointmentservices/setAppointment'
                     ]
                     apis.each { path ->
-                        sh "curl -o /dev/null -s -w '%{http_code}' http://localhost:8243${path}"
+                        def code = sh(
+                            script: "curl -o /dev/null -s -w '%{http_code}' http://localhost:8243${path}",
+                            returnStdout: true
+                        ).trim()
+                        echo "HTTP ${code} for ${path}"
+                        if (code != "200" && code != "202") {
+                            error "❌ Smoke test failed for ${path}"
+                        }
                     }
                 }
             }
@@ -126,10 +141,11 @@ pipeline {
     post {
         always {
             echo "Pipeline completed. Cleaning workspace and stopping containers"
-            sh "docker stop ${CONTAINER_NAME} || true"
-            sh "docker rm ${CONTAINER_NAME} || true"
+            sh """
+                docker stop ${CONTAINER_NAME} || true
+                docker rm ${CONTAINER_NAME} || true
+            """
             cleanWs()
         }
     }
 }
-//hi
